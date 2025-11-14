@@ -5,6 +5,7 @@ import os
 from flask import Flask, request, jsonify, url_for, send_from_directory
 from flask_migrate import Migrate
 from flask_swagger import swagger
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 from flask_cors import CORS
 
@@ -34,7 +35,13 @@ app.url_map.strict_slashes = False
 # Setup the Flask-JWT-Extended extension
 app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY")
 
-CORS(app)
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+    supports_credentials=False,
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+)
 
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
 
@@ -92,6 +99,8 @@ def sitemap():
     return send_from_directory(static_file_dir, 'index.html')
 
 # any other endpoint will try to serve it like a static file
+
+
 @app.route('/<path:path>', methods=['GET'])
 def serve_any_other_file(path):
     if not os.path.isfile(os.path.join(static_file_dir, path)):
@@ -101,7 +110,7 @@ def serve_any_other_file(path):
     return response
 
 
-#prueba send-mail
+# prueba send-mail
 @app.route('/api/send-mail', methods=['GET'])
 def send_mail():
     msg = Message(
@@ -112,6 +121,7 @@ def send_mail():
     msg.html = '<h1>Testeando envio de correo</h1>'
     mail.send(msg)
     return jsonify({'msg': 'Correo enviado con exito'}), 200
+
 
 @app.route('/api/register', methods=['POST'])
 def register():
@@ -132,8 +142,8 @@ def register():
     if 'telefono' not in body:
         return jsonify({'msg': 'El campo telefono es obligatorio'}), 400
     if 'genero' not in body:
-        return jsonify({'msg': 'El campo Genero es obligatorio'}),400
-    
+        return jsonify({'msg': 'El campo Genero es obligatorio'}), 400
+
     email = body.get("email")
     password = body.get("password")
     nombre = body.get("nombre")
@@ -144,22 +154,23 @@ def register():
 
     user = User.query.filter_by(email=email).first()
     if user is not None:
-        return jsonify({'msg': 'Error al registrar Usuario!'}), 400 
-    
+        return jsonify({'msg': 'Error al registrar Usuario!'}), 400
+
     pw_hash = bcrypt.generate_password_hash(password).decode('utf-8')
-    user = User(email=email, name=nombre, password_hash=pw_hash, age=edad, lastname=apellidos, gender=genero, phone=telefono)
+    user = User(email=email, name=nombre, password_hash=pw_hash,
+                age=edad, lastname=apellidos, gender=genero, phone=telefono)
     db.session.add(user)
     db.session.commit()
-
 
     # access_token = create_access_token(identity=str(user.id))
     return jsonify({'msg': 'User Registered successfully'})
 
+
 @app.route('/api/login', methods=['POST'])
 def login():
-    
+
     body = request.get_json(silent=True)
-    # validar body
+
     if body is None:
         return jsonify({'msg': 'POST method needs a body or email/password not found.'}), 400
     if 'email' not in body:
@@ -172,7 +183,7 @@ def login():
 
     user = User.query.filter_by(email=email).first()
     if not user:
-        return jsonify({'msg':'User or password incorrect'}), 400
+        return jsonify({'msg': 'User or password incorrect'}), 400
     # validar password
     is_password = bcrypt.check_password_hash(user.password_hash, password)
 
@@ -180,14 +191,13 @@ def login():
         return jsonify({'msg': 'User or password incorrect'}), 400
     # crear token
     access_token = create_access_token(identity=str(user.id))
-    
+
     return jsonify(access_token=access_token)
 
 
 @app.route("/api/me", methods=["GET"])
 @jwt_required()
 def me():
-    
 
     current_user = get_jwt_identity()
     user = User.query.get(current_user)
@@ -195,10 +205,90 @@ def me():
     return jsonify(user.serialize()), 200
 
 
-#endPoint completo ACTIVITY ----> GET POST PUT DELETE
+# endPoint completo ACTIVITY ----> GET POST PUT DELETE
 
 
-    
+# Enpoint Editar Perfil y Eliminar Perfil ----> PUT DELETE
+
+# Editar usuario (PUT)
+@app.route('/api/user/<int:user_id>', methods=['PUT'])
+@jwt_required()
+def edit_user(user_id):
+    current_user_id = get_jwt_identity()
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({'msg': 'Token inválido'}), 401
+    if current_user_id != user_id:
+        return jsonify({'msg': 'No autorizado'}), 403
+
+    body = request.get_json(silent=True)
+    if body is None or not isinstance(body, dict):
+        return jsonify({'msg': 'PUT necesita JSON en el body'}), 400
+
+    user = User.query.get(user_id)
+    if user is None:
+        return jsonify({'msg': 'Usuario no encontrado'}), 404
+
+    if 'email' in body:
+        new_email = str(body['email']).strip().lower()
+        if not new_email:
+            return jsonify({'msg': 'Email inválido'}), 400
+        if User.query.filter(User.email == new_email, User.id != user_id).first():
+            return jsonify({'msg': 'Email ya en uso'}), 400
+        user.email = new_email
+
+    if 'name' in body:
+        name = str(body['name']).strip()
+        if len(name) < 2:
+            return jsonify({'msg': 'El nombre debe tener al menos 2 caracteres'}), 400
+        user.name = name
+
+    if 'lastname' in body:
+        user.lastname = str(body['lastname']).strip()
+
+    if 'age' in body:
+        try:
+            age = int(body['age'])
+        except (TypeError, ValueError):
+            return jsonify({'msg': 'Edad inválida'}), 400
+        if age < 18 or age > 120:
+            return jsonify({'msg': 'Debe ser mayor de edad'}), 400
+        user.age = age
+
+    if 'phone' in body:
+        user.phone = str(body['phone']).strip()
+
+    if 'gender' in body:
+        gender = str(body['gender']).strip()
+        if gender not in ('male', 'female', 'other'):
+            return jsonify({'msg': "Género inválido (usa 'male' | 'female' | 'other')"}), 400
+        user.gender = gender
+
+    db.session.commit()
+    return jsonify({'msg': 'Usuario actualizado correctamente', 'user': user.serialize()}), 200
+
+
+# Eliminar usuario (DELETE)
+@app.route('/api/user/<int:user_id>', methods=['DELETE'])
+@jwt_required()
+def delete_user(user_id):
+    current_user_id = get_jwt_identity()
+    try:
+        current_user_id = int(current_user_id)
+    except (TypeError, ValueError):
+        return jsonify({'msg': 'Token inválido'}), 401
+    if current_user_id != user_id:
+        return jsonify({'msg': 'No autorizado'}), 403
+
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'msg': 'Usuario no encontrado'}), 404
+
+    db.session.delete(user)
+    db.session.commit()
+    return ("", 204)
+
 
 # this only runs if `$ python src/main.py` is executed
 if __name__ == '__main__':
