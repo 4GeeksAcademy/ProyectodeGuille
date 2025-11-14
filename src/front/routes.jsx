@@ -14,10 +14,14 @@ import { MapView } from "./pages/MapView";
 import { Single } from "./pages/Single";
 import { Demo } from "./pages/Demo";
 import User from "./pages/User";
+<<<<<<< HEAD
+import { EditProfile } from "./pages/EditProfile";
+=======
 
 const BASE_NAME = import.meta.env.VITE_BASENAME || "/";
 
 
+>>>>>>> origin/develop
 export const router = createBrowserRouter(
   createRoutesFromElements(
     <Route path="/" element={<Layout />} errorElement={<h1>Not found!</h1>}>
@@ -31,6 +35,11 @@ export const router = createBrowserRouter(
       <Route path="/forgot" element={<Forgot />} />
       <Route path="/reset/:token" element={<Reset />} /> 
       <Route path="/map" element={<MapView />} />
+<<<<<<< HEAD
+      <Route path="/profile" element={<Profile />} />
+      <Route path="/editprofile" element={<EditProfile />} />
+=======
+>>>>>>> origin/develop
       <Route path="*" element={<Login />} />
       <Route path="/user" element={<User />} />
     </Route>
