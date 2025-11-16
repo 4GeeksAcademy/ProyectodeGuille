@@ -1,5 +1,4 @@
-// Import necessary components and functions from react-router-dom.
-
+// src/front/routes.jsx
 import {
     createBrowserRouter,
     createRoutesFromElements,
@@ -9,22 +8,39 @@ import { Layout } from "./pages/Layout";
 import { Home } from "./pages/Home";
 import { Single } from "./pages/Single";
 import { Demo } from "./pages/Demo";
+import { SearchResults } from "./pages/SearchResults";
+import { ExperienceDetail } from "./pages/ExperienceDetail";
+import { RoomDetail } from "./pages/RoomDetail";
+import { Cart } from "./pages/Cart";
+import { Checkout } from "./pages/Checkout";
+import { Confirmation } from "./pages/Confirmation";  // 👈 NUEVO
 
 export const router = createBrowserRouter(
     createRoutesFromElements(
-    // CreateRoutesFromElements function allows you to build route elements declaratively.
-    // Create your routes here, if you want to keep the Navbar and Footer in all views, add your new routes inside the containing Route.
-    // Root, on the contrary, create a sister Route, if you have doubts, try it!
-    // Note: keep in mind that errorElement will be the default page when you don't get a route, customize that page to make your project more attractive.
-    // Note: The child paths of the Layout element replace the Outlet component with the elements contained in the "element" attribute of these child paths.
-
-      // Root Route: All navigation will start from here.
-      <Route path="/" element={<Layout />} errorElement={<h1>Not found!</h1>} >
-
-        {/* Nested Routes: Defines sub-routes within the BaseHome component. */}
-        <Route path= "/" element={<Home />} />
-        <Route path="/single/:theId" element={ <Single />} />  {/* Dynamic route for single items */}
-        <Route path="/demo" element={<Demo />} />
-      </Route>
-    )
+        <Route path="/" element={<Layout />} errorElement={<h1>Not found!</h1>} >
+            {/* Main Routes */}
+            <Route path="/" element={<Home />} />
+            <Route path="/search" element={<SearchResults />} />
+            
+            {/* Detail Pages */}
+            <Route path="/experience/:id" element={<ExperienceDetail />} />
+            <Route path="/room/:id" element={<RoomDetail />} />
+            
+            {/* Booking Flow */}
+            <Route path="/cart" element={<Cart />} />
+            <Route path="/checkout" element={<Checkout />} />
+            <Route path="/confirmation" element={<Confirmation />} />  {/* 👈 NUEVO */}
+            
+            {/* Other Pages */}
+            <Route path="/single/:theId" element={<Single />} />
+            <Route path="/demo" element={<Demo />} />
+        </Route>
+    ),
+    {
+        basename: import.meta.env.VITE_BASENAME || "",
+        future: {
+            v7_startTransition: true,
+            v7_relativeSplatPath: true
+        }
+    }
 );

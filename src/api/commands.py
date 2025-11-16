@@ -1,4 +1,4 @@
-
+# src/api/commands.py
 import click
 from api.models import db, User
 
@@ -32,3 +32,10 @@ def setup_commands(app):
     @app.cli.command("insert-test-data")
     def insert_test_data():
         pass
+    
+    # 👇 NUEVO COMANDO SEED
+    @app.cli.command("seed")
+    def seed_data():
+        """Poblar la base de datos con datos de CaliaFarm"""
+        from api.seed import seed_database
+        seed_database()
