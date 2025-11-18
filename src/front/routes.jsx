@@ -15,6 +15,8 @@ import { Single } from "./pages/Single";
 import { Demo } from "./pages/Demo";
 import User from "./pages/User";
 import { Profile } from "./pages/Profile";
+import { Eventos } from "./pages/Eventos";
+
 const BASE_NAME = import.meta.env.VITE_BASENAME || "/";
 
 export const router = createBrowserRouter(
@@ -35,6 +37,7 @@ createRoutesFromElements(
       <Route path="*" element={<Login />} />
       <Route path="/user" element={<User />} />
       <Route path="/mapview" element={<MapView />} />
+      <Route path="/eventos" element={<Eventos />} />
     </Route>
   ),
     {
@@ -43,6 +46,5 @@ createRoutesFromElements(
 );
 
   
-
 
 
