@@ -3,9 +3,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..models import db, Product, Quote, QuoteItem, User
 
 
-def setup_quotes_routes(app):
-
-    @app.route('/quotes', methods=['POST'])
+def setup_quotes_routes(api):
+    @api.route('/quotes', methods=['POST'])
     @jwt_required()
     def create_quote():
         try:
@@ -59,7 +58,7 @@ def setup_quotes_routes(app):
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/quotes', methods=['GET'])
+    @api.route('/quotes', methods=['GET'])
     @jwt_required()
     def get_quotes():
         try:
@@ -80,7 +79,7 @@ def setup_quotes_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/quotes/<int:quote_id>', methods=['GET'])
+    @api.route('/quotes/<int:quote_id>', methods=['GET'])
     @jwt_required()
     def get_quote(quote_id):
         try:

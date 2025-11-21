@@ -4,9 +4,8 @@ from ..models import db, User, Product, Quote
 from datetime import datetime, timedelta
 
 
-def setup_analytics_routes(app):
-
-    @app.route('/analytics/overview', methods=['GET'])
+def setup_analytics_routes(api):
+    @api.route('/analytics/overview', methods=['GET'])
     @jwt_required()
     def get_analytics_overview():
         try:

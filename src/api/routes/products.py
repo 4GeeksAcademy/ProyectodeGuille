@@ -3,9 +3,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..models import db, Product, User
 
 
-def setup_products_routes(app):
-
-    @app.route('/products', methods=['GET'])
+def setup_products_routes(api):
+    @api.route('/products', methods=['GET'])
     def get_products():
         try:
             category = request.args.get('category', 'all')
@@ -40,7 +39,7 @@ def setup_products_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/products/<int:product_id>', methods=['GET'])
+    @api.route('/products/<int:product_id>', methods=['GET'])
     def get_product(product_id):
         try:
             product = Product.query.get(product_id)
@@ -66,7 +65,7 @@ def setup_products_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/products/categories', methods=['GET'])
+    @api.route('/products/categories', methods=['GET'])
     def get_categories():
         try:
             categories = [
@@ -91,7 +90,7 @@ def setup_products_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/products', methods=['POST'])
+    @api.route('/products', methods=['POST'])
     @jwt_required()
     def create_product():
         try:
@@ -127,7 +126,7 @@ def setup_products_routes(app):
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/products/<int:product_id>', methods=['PUT'])
+    @api.route('/products/<int:product_id>', methods=['PUT'])
     @jwt_required()
     def update_product(product_id):
         try:

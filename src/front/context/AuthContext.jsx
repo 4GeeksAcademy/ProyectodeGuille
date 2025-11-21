@@ -26,7 +26,7 @@ export const AuthProvider = ({ children }) => {
                 return;
             }
 
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/customer/profile`, {
+            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/user/profile`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
@@ -101,7 +101,7 @@ export const AuthProvider = ({ children }) => {
 
     const logout = async () => {
         try {
-            await fetch(`${process.env.BACKEND_URL}/api/logout`, {
+            await fetch(`${import.meta.env.VITE_BACKEND_URL}/logout`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${getToken()}`
@@ -117,7 +117,7 @@ export const AuthProvider = ({ children }) => {
 
     const updateProfile = async (profileData) => {
         try {
-            const response = await fetch(`${process.env.BACKEND_URL}/api/customer/profile`, {
+            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/user/profile`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -141,7 +141,7 @@ export const AuthProvider = ({ children }) => {
 
     const deleteAccount = async () => {
         try {
-            const response = await fetch(`${process.env.BACKEND_URL}/api/customer/delete-account`, {
+            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/user/delete-account`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${getToken()}`

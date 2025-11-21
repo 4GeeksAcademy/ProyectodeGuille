@@ -3,9 +3,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..models import db, User, Product, Quote
 
 
-def setup_business_routes(app):
-
-    @app.route('/business/products', methods=['GET'])
+def setup_business_routes(api):
+    @api.route('/business/products', methods=['GET'])
     @jwt_required()
     def get_business_products():
         try:
@@ -31,7 +30,7 @@ def setup_business_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/business/quotes', methods=['GET'])
+    @api.route('/business/quotes', methods=['GET'])
     @jwt_required()
     def get_business_quotes():
         try:

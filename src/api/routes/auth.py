@@ -1,13 +1,13 @@
-from flask import request, jsonify, session
+from flask import request, jsonify
+from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity
 from ..models import db, User
 from ..utils import generate_sitemap, APIException
 import bcrypt
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
-def setup_auth_routes(app):
-
-    @app.route('/api/register', methods=['POST'])
+def setup_auth_routes(api):
+    @api.route('/register', methods=['POST'])
     def register():
         try:
             data = request.get_json()
@@ -35,10 +35,15 @@ def setup_auth_routes(app):
             db.session.add(user)
             db.session.commit()
 
-            session['user_id'] = user.id
+            # Crear token JWT
+            access_token = create_access_token(
+                identity=user.id,
+                expires_delta=timedelta(days=7)
+            )
 
             return jsonify({
                 'message': 'User registered successfully',
+                'access_token': access_token,
                 'user': {
                     'id': user.id,
                     'email': user.email,
@@ -53,16 +58,22 @@ def setup_auth_routes(app):
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/login', methods=['POST'])
+    @api.route('/login', methods=['POST'])
     def login():
         try:
             data = request.get_json()
             user = User.query.filter_by(email=data['email']).first()
 
             if user and bcrypt.check_password_hash(user.password, data['password']):
-                session['user_id'] = user.id
+                # Crear token JWT
+                access_token = create_access_token(
+                    identity=user.id,
+                    expires_delta=timedelta(days=7)
+                )
+
                 return jsonify({
                     'message': 'Login successful',
+                    'access_token': access_token,
                     'user': {
                         'id': user.id,
                         'email': user.email,
@@ -78,18 +89,19 @@ def setup_auth_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/logout', methods=['POST'])
+    @api.route('/logout', methods=['POST'])
+    @jwt_required()
     def logout():
-        session.pop('user_id', None)
+        # Con JWT, el logout se maneja en el frontend eliminando el token
         return jsonify({'message': 'Logout successful'}), 200
 
-    @app.route('/api/user/profile', methods=['GET'])
+    @api.route('/user/profile', methods=['GET'])
+    @jwt_required()
     def get_profile():
         try:
-            if 'user_id' not in session:
-                return jsonify({'error': 'Not authenticated'}), 401
+            current_user_id = get_jwt_identity()
+            user = User.query.get(current_user_id)
 
-            user = User.query.get(session['user_id'])
             if not user:
                 return jsonify({'error': 'User not found'}), 404
 
@@ -109,13 +121,13 @@ def setup_auth_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/user/profile', methods=['PUT'])
+    @api.route('/user/profile', methods=['PUT'])
+    @jwt_required()
     def update_profile():
         try:
-            if 'user_id' not in session:
-                return jsonify({'error': 'Not authenticated'}), 401
+            current_user_id = get_jwt_identity()
+            user = User.query.get(current_user_id)
 
-            user = User.query.get(session['user_id'])
             if not user:
                 return jsonify({'error': 'User not found'}), 404
 
@@ -145,20 +157,19 @@ def setup_auth_routes(app):
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/api/user/delete-account', methods=['DELETE'])
+    @api.route('/user/delete-account', methods=['DELETE'])
+    @jwt_required()
     def delete_account():
         try:
-            if 'user_id' not in session:
-                return jsonify({'error': 'Not authenticated'}), 401
+            current_user_id = get_jwt_identity()
+            user = User.query.get(current_user_id)
 
-            user = User.query.get(session['user_id'])
             if not user:
                 return jsonify({'error': 'User not found'}), 404
 
-            # En una implementación real, podrías querer soft delete
-            db.session.delete(user)
+            # Soft delete - mark as inactive
+            user.is_active = False
             db.session.commit()
-            session.pop('user_id', None)
 
             return jsonify({'message': 'Account deleted successfully'}), 200
 

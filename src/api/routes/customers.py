@@ -3,9 +3,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from ..models import db, User
 
 
-def setup_customers_routes(app):
-
-    @app.route('/customer/profile', methods=['GET'])
+def setup_customers_routes(api):
+    @api.route('/customer/profile', methods=['GET'])
     @jwt_required()
     def get_customer_profile():
         try:
@@ -31,7 +30,7 @@ def setup_customers_routes(app):
         except Exception as e:
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/customer/profile', methods=['PUT'])
+    @api.route('/customer/profile', methods=['PUT'])
     @jwt_required()
     def update_customer_profile():
         try:
@@ -71,7 +70,7 @@ def setup_customers_routes(app):
             db.session.rollback()
             return jsonify({'error': str(e)}), 500
 
-    @app.route('/customer/delete-account', methods=['DELETE'])
+    @api.route('/customer/delete-account', methods=['DELETE'])
     @jwt_required()
     def delete_customer_account():
         try:
