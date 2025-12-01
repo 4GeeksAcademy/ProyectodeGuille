@@ -1,165 +1,106 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react'
 
-const AuthContext = createContext();
+const AuthContext = createContext()
 
 export const useAuth = () => {
-    const context = useContext(AuthContext);
+    const context = useContext(AuthContext)
     if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
+        throw new Error('useAuth must be used within an AuthProvider')
     }
-    return context;
-};
+    return context
+}
 
 export const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [user, setUser] = useState(null)
+    const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        checkAuthStatus();
-    }, []);
+        checkAuthStatus()
+    }, [])
 
     const checkAuthStatus = async () => {
         try {
-            const token = getToken();
+            const token = localStorage.getItem('token')
             if (!token) {
-                setLoading(false);
-                return;
+                setLoading(false)
+                return
             }
 
             const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/user/profile`, {
                 headers: {
                     'Authorization': `Bearer ${token}`
                 }
-            });
+            })
 
             if (response.ok) {
-                const data = await response.json();
-                setUser(data.user);
+                const data = await response.json()
+                setUser(data.user)
+            } else {
+                localStorage.removeItem('token')
             }
         } catch (error) {
-            console.error('Auth check failed:', error);
+            console.error('Auth check failed:', error)
         } finally {
-            setLoading(false);
+            setLoading(false)
         }
-    };
+    }
 
-    const getToken = () => {
-        return localStorage.getItem('token');
-    };
-
-    const setToken = (token) => {
-        localStorage.setItem('token', token);
-    };
-
-    const login = async (email, password, role = 'customer') => {
+    const login = async (email, password) => {
         try {
             const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/login`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ email, password, role })
-            });
+                body: JSON.stringify({ email, password })
+            })
 
             if (response.ok) {
-                const data = await response.json();
-                setToken(data.access_token);
-                setUser(data.user);
-                return { success: true, user: data.user };
+                const data = await response.json()
+                localStorage.setItem('token', data.access_token)
+                setUser(data.user)
+                return { success: true, user: data.user }
             } else {
-                const error = await response.json();
-                return { success: false, error: error.error || error.msg };
+                const error = await response.json()
+                return { success: false, error: error.error }
             }
         } catch (error) {
-            return { success: false, error: 'Login failed' };
+            return { success: false, error: 'Login failed' }
         }
-    };
+    }
 
     const register = async (userData) => {
         try {
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/signup`, {
+            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/register`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify(userData)
-            });
+            })
 
             if (response.ok) {
-                const data = await response.json();
-                setToken(data.access_token);
-                setUser(data.user);
-                return { success: true, user: data.user };
+                const data = await response.json()
+                localStorage.setItem('token', data.access_token)
+                setUser(data.user)
+                return { success: true, user: data.user }
             } else {
-                const error = await response.json();
-                return { success: false, error: error.error || error.msg };
+                const error = await response.json()
+                return { success: false, error: error.error }
             }
         } catch (error) {
-            return { success: false, error: 'Registration failed' };
+            return { success: false, error: 'Registration failed' }
         }
-    };
+    }
 
-    const logout = async () => {
-        try {
-            await fetch(`${import.meta.env.VITE_BACKEND_URL}/logout`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`
-                }
-            });
-        } catch (error) {
-            console.error('Logout failed:', error);
-        } finally {
-            localStorage.removeItem('token');
-            setUser(null);
-        }
-    };
+    const logout = () => {
+        localStorage.removeItem('token')
+        setUser(null)
+    }
 
-    const updateProfile = async (profileData) => {
-        try {
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/user/profile`, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${getToken()}`
-                },
-                body: JSON.stringify(profileData)
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                setUser(data.user);
-                return { success: true, user: data.user };
-            } else {
-                const error = await response.json();
-                return { success: false, error: error.error };
-            }
-        } catch (error) {
-            return { success: false, error: 'Profile update failed' };
-        }
-    };
-
-    const deleteAccount = async () => {
-        try {
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/user/delete-account`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${getToken()}`
-                }
-            });
-
-            if (response.ok) {
-                localStorage.removeItem('token');
-                setUser(null);
-                return { success: true };
-            } else {
-                const error = await response.json();
-                return { success: false, error: error.error };
-            }
-        } catch (error) {
-            return { success: false, error: 'Account deletion failed' };
-        }
-    };
+    const getToken = () => {
+        return localStorage.getItem('token')
+    }
 
     const value = {
         user,
@@ -167,15 +108,13 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
-        updateProfile,
-        deleteAccount,
-        checkAuthStatus,
-        getToken
-    };
+        getToken,
+        checkAuthStatus
+    }
 
     return (
         <AuthContext.Provider value={value}>
             {children}
         </AuthContext.Provider>
-    );
-};
+    )
+}
