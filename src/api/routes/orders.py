@@ -1,172 +1,308 @@
-from flask import request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from ..models import db, Cart, CartItem, Product, Order, OrderItem
-import stripe
-import os
+from flask import Blueprint, jsonify, request
+from .payments import payments_bp
+from datetime import datetime, timedelta
+import random
+
+orders_bp = Blueprint('orders', __name__)
+
+# Base de datos de órdenes en memoria
+orders_db = []
+order_counter = 1000
+
+# Estados posibles de órdenes
+ORDER_STATUSES = [
+    "pending",       # Pendiente de pago
+    "processing",    # Procesando
+    "shipped",       # Enviado
+    "delivered",     # Entregado
+    "cancelled"      # Cancelado
+]
+
+# Métodos de pago
+PAYMENT_METHODS = ["credit_card", "debit_card", "paypal", "bank_transfer"]
 
 
-def setup_orders_routes(api):
-    @api.route('/orders', methods=['GET'])
-    @jwt_required()
-    def get_orders():
-        try:
-            user_id = get_jwt_identity()
-            orders = Order.query.filter_by(user_id=user_id).order_by(
-                Order.created_at.desc()).all()
-            return jsonify({'orders': [order.serialize() for order in orders]}), 200
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+@orders_bp.route('/', methods=['GET'])
+def get_orders():
+    """Obtener todas las órdenes (con filtros)"""
+    user_id = request.args.get('user_id', type=int)
+    status = request.args.get('status')
+    limit = request.args.get('limit', type=int, default=20)
 
-    @api.route('/orders/<int:order_id>', methods=['GET'])
-    @jwt_required()
-    def get_order(order_id):
-        try:
-            user_id = get_jwt_identity()
-            order = Order.query.get(order_id)
+    filtered_orders = orders_db
 
-            if not order or order.user_id != user_id:
-                return jsonify({'error': 'Order not found'}), 404
+    if user_id:
+        filtered_orders = [
+            order for order in filtered_orders if order['user_id'] == user_id]
 
-            order_items = OrderItem.query.filter_by(order_id=order_id).all()
-            items = []
+    if status:
+        filtered_orders = [
+            order for order in filtered_orders if order['status'] == status]
 
-            for item in order_items:
-                product = Product.query.get(item.product_id)
-                if product:
-                    items.append({
-                        'product_id': product.id,
-                        'name': product.name,
-                        'price': item.price,
-                        'quantity': item.quantity,
-                        'subtotal': item.price * item.quantity
-                    })
+    # Ordenar por fecha más reciente
+    filtered_orders.sort(key=lambda x: x['created_at'], reverse=True)
 
+    # Limitar resultados
+    filtered_orders = filtered_orders[:limit]
+
+    return jsonify({
+        "success": True,
+        "count": len(filtered_orders),
+        "orders": filtered_orders
+    })
+
+
+@orders_bp.route('/<int:order_id>', methods=['GET'])
+def get_order(order_id):
+    """Obtener una orden específica"""
+    order = next(
+        (order for order in orders_db if order['id'] == order_id), None)
+
+    if not order:
+        return jsonify({"error": "Orden no encontrada"}), 404
+
+    return jsonify({
+        "success": True,
+        "order": order
+    })
+
+
+@orders_bp.route('/', methods=['POST'])
+def create_order():
+    """Crear una nueva orden desde el carrito"""
+    data = request.json
+
+    if not data or 'user_id' not in data or 'items' not in data:
+        return jsonify({"error": "user_id y items son requeridos"}), 400
+
+    user_id = data['user_id']
+    items = data['items']
+
+    if not items:
+        return jsonify({"error": "El carrito está vacío"}), 400
+
+    # 1. VERIFICAR STOCK ANTES DE CREAR LA ORDEN
+    for item in items:
+        # En producción, verificar contra base de datos real
+        if item.get('quantity', 1) > item.get('available_stock', 0):
             return jsonify({
-                'order': order.serialize(),
-                'items': items
-            }), 200
+                "error": f"Stock insuficiente para {item.get('name', 'producto')}",
+                "product_id": item.get('product_id')
+            }), 400
 
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    # 2. Calcular totales
+    subtotal = sum(item.get('price', 0) * item.get('quantity', 1)
+                   for item in items)
+    shipping = data.get('shipping', 10.00 if subtotal < 100 else 0)
+    tax = round(subtotal * 0.08, 2)
+    total = subtotal + shipping + tax
 
-    @api.route('/checkout/create-payment', methods=['POST'])
-    @jwt_required()
-    def create_payment():
-        try:
-            user_id = get_jwt_identity()
+    global order_counter
+    order_counter += 1
 
-            # Obtener carrito
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if not cart:
-                return jsonify({'error': 'Cart is empty'}), 400
+    # 3. Crear nueva orden
+    new_order = {
+        "id": order_counter,
+        "order_number": f"ORD-{datetime.now().strftime('%Y%m%d')}-{order_counter:04d}",
+        "user_id": user_id,
+        "items": items,
+        "subtotal": subtotal,
+        "shipping": shipping,
+        "tax": tax,
+        "total": total,
+        "status": "pending_payment",  # Nuevo estado
+        "payment_method": data.get('payment_method', 'credit_card'),
+        "payment_status": "pending",
+        "payment_id": None,
+        "shipping_address": data.get('shipping_address', {}),
+        "billing_address": data.get('billing_address', {}),
+        "customer_notes": data.get('customer_notes', ""),
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+        "estimated_delivery": (datetime.utcnow() + timedelta(days=random.randint(3, 7))).isoformat()
+    }
 
-            cart_items = CartItem.query.filter_by(cart_id=cart.id).all()
-            if not cart_items:
-                return jsonify({'error': 'Cart is empty'}), 400
+    orders_db.append(new_order)
 
-            # Calcular total y verificar stock
-            total = 0
-            items_to_order = []
+    # 4. Retornar datos para pago
+    return jsonify({
+        "success": True,
+        "message": "Orden creada, proceder al pago",
+        "order": new_order,
+        "payment_required": True,
+        "payment_amount": total,
+        "payment_endpoint": "/api/payments/create-payment"
+    }), 201
 
-            for cart_item in cart_items:
-                product = Product.query.get(cart_item.product_id)
-                if not product or not product.is_active:
-                    return jsonify({'error': f'Product {cart_item.product_id} not available'}), 400
 
-                if product.stock < cart_item.quantity:
-                    return jsonify({'error': f'Insufficient stock for {product.name}'}), 400
+@orders_bp.route('/<int:order_id>/status', methods=['PUT'])
+def update_order_status(order_id):
+    """Actualizar el estado de una orden"""
+    data = request.json
 
-                item_total = product.price * cart_item.quantity
-                total += item_total
+    if not data or 'status' not in data:
+        return jsonify({"error": "status es requerido"}), 400
 
-                items_to_order.append({
-                    'product': product,
-                    'cart_item': cart_item,
-                    'quantity': cart_item.quantity,
-                    'price': product.price
-                })
+    new_status = data['status']
 
-            # Crear orden pendiente
-            order = Order(
-                user_id=user_id,
-                total_amount=total,
-                status='pending'
-            )
-            db.session.add(order)
-            db.session.flush()
+    if new_status not in ORDER_STATUSES:
+        return jsonify({"error": f"Estado inválido. Opciones: {ORDER_STATUSES}"}), 400
 
-            # Crear items de la orden
-            for item in items_to_order:
-                order_item = OrderItem(
-                    order_id=order.id,
-                    product_id=item['product'].id,
-                    quantity=item['quantity'],
-                    price=item['price']
-                )
-                db.session.add(order_item)
+    # Buscar la orden
+    order = next(
+        (order for order in orders_db if order['id'] == order_id), None)
 
-            # Configurar Stripe (simulado)
-            stripe.api_key = os.environ.get(
-                'STRIPE_SECRET_KEY', 'sk_test_demo')
+    if not order:
+        return jsonify({"error": "Orden no encontrada"}), 404
 
-            # Crear Payment Intent (simulado para demo)
-            payment_intent = {
-                'id': f'pi_demo_{order.id}',
-                'client_secret': f'pi_demo_secret_{order.id}',
-                'amount': int(total * 100)
+    # Actualizar estado
+    order['status'] = new_status
+    order['updated_at'] = datetime.utcnow().isoformat()
+
+    # Si se marca como enviado, agregar tracking
+    if new_status == 'shipped':
+        order['tracking_number'] = f"TRK-{random.randint(1000000000, 9999999999)}"
+        order['shipped_at'] = datetime.utcnow().isoformat()
+
+    return jsonify({
+        "success": True,
+        "message": f"Estado actualizado a '{new_status}'",
+        "order": order
+    })
+
+
+@orders_bp.route('/<int:order_id>/cancel', methods=['POST'])
+def cancel_order(order_id):
+    """Cancelar una orden"""
+
+    # Buscar la orden
+    order = next(
+        (order for order in orders_db if order['id'] == order_id), None)
+
+    if not order:
+        return jsonify({"error": "Orden no encontrada"}), 404
+
+    # Verificar si se puede cancelar
+    if order['status'] in ['shipped', 'delivered']:
+        return jsonify({"error": "No se puede cancelar una orden ya enviada o entregada"}), 400
+
+    # Actualizar estado
+    order['status'] = 'cancelled'
+    order['updated_at'] = datetime.utcnow().isoformat()
+    order['cancelled_at'] = datetime.utcnow().isoformat()
+    order['cancellation_reason'] = request.json.get(
+        'reason', 'Solicitud del cliente')
+
+    return jsonify({
+        "success": True,
+        "message": "Orden cancelada exitosamente",
+        "order": order
+    })
+
+
+@orders_bp.route('/user/<int:user_id>/summary', methods=['GET'])
+def get_user_orders_summary(user_id):
+    """Obtener resumen de órdenes del usuario"""
+
+    user_orders = [order for order in orders_db if order['user_id'] == user_id]
+
+    if not user_orders:
+        return jsonify({
+            "success": True,
+            "summary": {
+                "total_orders": 0,
+                "total_spent": 0,
+                "avg_order_value": 0,
+                "last_order_date": None
             }
+        })
 
-            order.stripe_payment_id = payment_intent['id']
-            db.session.commit()
+    total_spent = sum(order['total'] for order in user_orders)
+    avg_order_value = total_spent / len(user_orders)
+    last_order = max(user_orders, key=lambda x: x['created_at'])
 
-            return jsonify({
-                'payment_intent': payment_intent,
-                'order_id': order.id,
-                'total': total
-            }), 200
+    # Contar por estado
+    status_counts = {}
+    for order in user_orders:
+        status = order['status']
+        status_counts[status] = status_counts.get(status, 0) + 1
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+    return jsonify({
+        "success": True,
+        "summary": {
+            "total_orders": len(user_orders),
+            "total_spent": total_spent,
+            "avg_order_value": avg_order_value,
+            "last_order_date": last_order['created_at'],
+            "status_counts": status_counts
+        }
+    })
 
-    @api.route('/checkout/confirm', methods=['POST'])
-    @jwt_required()
-    def confirm_payment():
-        try:
-            user_id = get_jwt_identity()
-            data = request.get_json()
-            order_id = data.get('order_id')
 
-            order = Order.query.get(order_id)
-            if not order or order.user_id != user_id:
-                return jsonify({'error': 'Order not found'}), 404
+@orders_bp.route('/generate-sample', methods=['POST'])
+def generate_sample_orders():
+    """Generar órdenes de ejemplo (solo para desarrollo)"""
+    user_id = request.json.get('user_id', 1)
+    count = request.json.get('count', 5)
 
-            if order.status != 'pending':
-                return jsonify({'error': 'Order already processed'}), 400
+    sample_products = [
+        {"id": 1, "name": "Producto Premium", "price": 150.00},
+        {"id": 2, "name": "Producto Básico", "price": 89.99},
+        {"id": 3, "name": "Producto Eco", "price": 120.50},
+        {"id": 4, "name": "Accesorio", "price": 29.99}
+    ]
 
-            # Obtener items de la orden
-            order_items = OrderItem.query.filter_by(order_id=order_id).all()
+    global order_counter
 
-            # Actualizar stock y completar orden
-            for item in order_items:
-                product = Product.query.get(item.product_id)
-                if product:
-                    product.stock -= item.quantity
+    for i in range(count):
+        order_counter += 1
 
-            # Limpiar carrito
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if cart:
-                CartItem.query.filter_by(cart_id=cart.id).delete()
-                cart.updated_at = db.func.now()
+        # Seleccionar productos aleatorios
+        num_items = random.randint(1, 3)
+        items = []
+        for _ in range(num_items):
+            product = random.choice(sample_products)
+            items.append({
+                "product_id": product["id"],
+                "name": product["name"],
+                "price": product["price"],
+                "quantity": random.randint(1, 3)
+            })
 
-            order.status = 'completed'
-            db.session.commit()
+        subtotal = sum(item['price'] * item['quantity'] for item in items)
+        shipping = 0 if subtotal > 100 else 10
+        tax = round(subtotal * 0.08, 2)
 
-            return jsonify({
-                'message': 'Payment confirmed successfully',
-                'order': order.serialize()
-            }), 200
+        # Fecha aleatoria en los últimos 60 días
+        days_ago = random.randint(0, 60)
+        order_date = datetime.utcnow() - timedelta(days=days_ago)
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+        new_order = {
+            "id": order_counter,
+            "order_number": f"ORD-{order_date.strftime('%Y%m%d')}-{order_counter:04d}",
+            "user_id": user_id,
+            "items": items,
+            "subtotal": subtotal,
+            "shipping": shipping,
+            "tax": tax,
+            "total": subtotal + shipping + tax,
+            "status": random.choice(ORDER_STATUSES),
+            "payment_method": random.choice(PAYMENT_METHODS),
+            "payment_status": "completed",
+            "created_at": order_date.isoformat(),
+            "updated_at": order_date.isoformat(),
+            "estimated_delivery": (order_date + timedelta(days=random.randint(3, 7))).isoformat()
+        }
+
+        # Si está entregado, agregar fecha de entrega
+        if new_order['status'] == 'delivered':
+            new_order['delivered_at'] = (
+                order_date + timedelta(days=random.randint(2, 5))).isoformat()
+
+        orders_db.append(new_order)
+
+    return jsonify({
+        "success": True,
+        "message": f"Generadas {count} órdenes de ejemplo",
+        "generated_orders": count
+    })

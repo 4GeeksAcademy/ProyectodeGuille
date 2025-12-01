@@ -1,23 +1,115 @@
-import React, { Component } from "react";
-import envFile from "../../../docs/assets/env-file.png"
+import React from 'react';
 
-const Dark = ({children}) => <span className="bg-dark text-white px-1 rounded">{children}</span>;
-export const BackendURL = () => (
-	<div className="mt-5 pt-5 w-50 mx-auto">
-		<h2>Missing BACKEND_URL env variable</h2>
-		<p>Here's a video tutorial on <a target="_blank" href="https://www.awesomescreenshot.com/video/16498567?key=72dbf905fe4fa6d3224783d02a8b1b9c">how to update your backend URL environment variable.</a></p>
-		<p>There's a file called <Dark>.env</Dark> that contains the environmental variables for your project.</p>
-		<p>There's one variable called <Dark>BACKEND_URL</Dark> that needs to be manually set by yourself.</p>
-		<ol>
-			<li>Make sure you backend is running on port 3001.</li>
-			<li>Open your API and copy the API host.</li>
-			<li>Open the .env file (do not open the .env.example)</li>
-			<li>Add a new variable VITE_BACKEND_URL=<Dark>your api host</Dark></li>
-			<li>Replace <Dark>your api host</Dark> with the public API URL of your flask backend sever running at port 3001</li>
-		</ol>
-		<div className="w-100">
-		<img src={envFile} className="w-100"/>
-		</div>
-		<p>Note: If you are publishing your website to Heroku, Render.com or any other hosting you probably need to follow other steps.</p>
-	</div>
-);
+// URL base del backend - usando tu URL específica
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://cuddly-space-fishstick-q7xqj5g5v45c9q49-3001.app.github.dev/api';
+
+const useBackend = () => {
+	// Función para hacer fetch al backend
+	const fetchFromBackend = async (endpoint, options = {}) => {
+		const url = `${BACKEND_URL}${endpoint}`;
+		const token = localStorage.getItem('token');
+
+		const defaultOptions = {
+			headers: {
+				'Content-Type': 'application/json',
+				...(token && { 'Authorization': `Bearer ${token}` }),
+				...options.headers
+			},
+			...options
+		};
+
+		try {
+			console.log('Fetching from:', url); // Debug
+			const response = await fetch(url, defaultOptions);
+
+			if (!response.ok) {
+				const errorText = await response.text();
+				console.error('Error response:', errorText);
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			const data = await response.json();
+			return data;
+		} catch (error) {
+			console.error('Error fetching from backend:', error);
+			throw error;
+		}
+	};
+
+	// Función para subir archivos (con FormData)
+	const uploadToBackend = async (endpoint, formData) => {
+		const url = `${BACKEND_URL}${endpoint}`;
+		const token = localStorage.getItem('token');
+
+		try {
+			const response = await fetch(url, {
+				method: 'POST',
+				headers: {
+					...(token && { 'Authorization': `Bearer ${token}` })
+				},
+				body: formData
+			});
+
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+
+			return await response.json();
+		} catch (error) {
+			console.error('Error uploading:', error);
+			throw error;
+		}
+	};
+
+	return {
+		BACKEND_URL,
+		fetchFromBackend,
+		uploadToBackend
+	};
+};
+
+export default useBackend;
+
+// Constantes de endpoints
+export const API_ENDPOINTS = {
+	AUTH: {
+		LOGIN: '/login',
+		REGISTER: '/register',
+		PROFILE: '/profile',
+		LOGOUT: '/logout'
+	},
+	PRODUCTS: {
+		LIST: '/products',
+		DETAIL: (id) => `/products/${id}`,
+		CREATE: '/products',
+		UPDATE: (id) => `/products/${id}`,
+		DELETE: (id) => `/products/${id}`
+	},
+	QUOTES: {
+		LIST: '/quotes',
+		CREATE: '/quotes',
+		DETAIL: (id) => `/quotes/${id}`,
+		UPDATE: (id) => `/quotes/${id}`
+	},
+	CART: {
+		GET: '/cart',
+		ADD: '/cart/add',
+		REMOVE: (id) => `/cart/remove/${id}`,
+		UPDATE: (id) => `/cart/update/${id}`
+	},
+	ORDERS: {
+		LIST: '/orders',
+		CREATE: '/orders',
+		DETAIL: (id) => `/orders/${id}`
+	},
+	BUSINESS: {
+		DASHBOARD: '/business/dashboard',
+		ANALYTICS: '/business/analytics',
+		PRODUCTS: '/business/products'
+	},
+	CUSTOMERS: {
+		PROFILE: '/customers/profile',
+		ORDERS: '/customers/orders',
+		QUOTES: '/customers/quotes'
+	}
+};

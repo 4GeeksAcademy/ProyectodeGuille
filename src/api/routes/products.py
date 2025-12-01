@@ -1,123 +1,84 @@
-from flask import request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from ..models import db, Product, User
+from flask import Blueprint, jsonify, request
+from datetime import datetime
+
+products_bp = Blueprint('products', __name__)
+
+# Base de datos de productos en memoria
+products_db = [
+    {
+        "id": 1,
+        "name": "Producto Sostenible 1",
+        "description": "Descripción del producto sostenible 1",
+        "price": 100.50,
+        "category": "Electrónicos",
+        "sustainability_score": 85,
+        "image_url": "https://via.placeholder.com/300",
+        "stock": 10,
+        "business_id": 1,
+        "created_at": datetime.utcnow().isoformat()
+    },
+    {
+        "id": 2,
+        "name": "Producto Sostenible 2",
+        "description": "Descripción del producto sostenible 2",
+        "price": 200.00,
+        "category": "Hogar",
+        "sustainability_score": 92,
+        "image_url": "https://via.placeholder.com/300",
+        "stock": 5,
+        "business_id": 1,
+        "created_at": datetime.utcnow().isoformat()
+    },
+    {
+        "id": 3,
+        "name": "Producto Sostenible 3",
+        "description": "Descripción del producto sostenible 3",
+        "price": 150.75,
+        "category": "Ropa",
+        "sustainability_score": 78,
+        "image_url": "https://via.placeholder.com/300",
+        "stock": 15,
+        "business_id": 2,
+        "created_at": datetime.utcnow().isoformat()
+    }
+]
 
 
-def setup_products_routes(api):
-    @api.route('/products', methods=['GET'])
-    def get_products():
-        try:
-            products = Product.query.filter_by(is_active=True).all()
-            return jsonify({'products': [p.serialize() for p in products]}), 200
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+@products_bp.route('/', methods=['GET'])
+def get_products():
+    """Obtener todos los productos"""
+    category = request.args.get('category')
+    search = request.args.get('search')
 
-    @api.route('/products/<int:product_id>', methods=['GET'])
-    def get_product(product_id):
-        try:
-            product = Product.query.get(product_id)
-            if not product or not product.is_active:
-                return jsonify({'error': 'Product not found'}), 404
-            return jsonify({'product': product.serialize()}), 200
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    filtered_products = products_db
 
-    @api.route('/products/categories', methods=['GET'])
-    def get_categories():
-        categories = ['electronics', 'clothing', 'books', 'home', 'sports']
-        return jsonify({'categories': categories}), 200
+    if category and category != 'all':
+        filtered_products = [
+            p for p in filtered_products if p['category'] == category]
 
-    @api.route('/products', methods=['POST'])
-    @jwt_required()
-    def create_product():
-        try:
-            user_id = get_jwt_identity()
-            user = User.query.get(user_id)
+    if search:
+        search_lower = search.lower()
+        filtered_products = [
+            p for p in filtered_products
+            if search_lower in p['name'].lower() or search_lower in p['description'].lower()
+        ]
 
-            if not user or user.role != 'admin':
-                return jsonify({'error': 'Unauthorized'}), 403
+    return jsonify(filtered_products)
 
-            data = request.get_json()
-            product = Product(
-                name=data['name'],
-                description=data['description'],
-                price=data['price'],
-                category=data.get('category', 'general'),
-                stock=data.get('stock', 0),
-                image_url=data.get('image_url', '')
-            )
 
-            db.session.add(product)
-            db.session.commit()
+@products_bp.route('/<int:product_id>', methods=['GET'])
+def get_product(product_id):
+    """Obtener un producto específico"""
+    product = next((p for p in products_db if p['id'] == product_id), None)
 
-            return jsonify({
-                'message': 'Product created successfully',
-                'product': product.serialize()
-            }), 201
+    if not product:
+        return jsonify({"error": "Producto no encontrado"}), 404
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+    return jsonify(product)
 
-    @api.route('/products/<int:product_id>', methods=['PUT'])
-    @jwt_required()
-    def update_product(product_id):
-        try:
-            user_id = get_jwt_identity()
-            user = User.query.get(user_id)
 
-            if not user or user.role != 'admin':
-                return jsonify({'error': 'Unauthorized'}), 403
-
-            product = Product.query.get(product_id)
-            if not product:
-                return jsonify({'error': 'Product not found'}), 404
-
-            data = request.get_json()
-
-            if 'name' in data:
-                product.name = data['name']
-            if 'description' in data:
-                product.description = data['description']
-            if 'price' in data:
-                product.price = data['price']
-            if 'stock' in data:
-                product.stock = data['stock']
-            if 'category' in data:
-                product.category = data['category']
-            if 'image_url' in data:
-                product.image_url = data['image_url']
-
-            db.session.commit()
-
-            return jsonify({
-                'message': 'Product updated successfully',
-                'product': product.serialize()
-            }), 200
-
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
-
-    @api.route('/products/<int:product_id>', methods=['DELETE'])
-    @jwt_required()
-    def delete_product(product_id):
-        try:
-            user_id = get_jwt_identity()
-            user = User.query.get(user_id)
-
-            if not user or user.role != 'admin':
-                return jsonify({'error': 'Unauthorized'}), 403
-
-            product = Product.query.get(product_id)
-            if not product:
-                return jsonify({'error': 'Product not found'}), 404
-
-            product.is_active = False
-            db.session.commit()
-
-            return jsonify({'message': 'Product deleted successfully'}), 200
-
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+@products_bp.route('/categories', methods=['GET'])
+def get_categories():
+    """Obtener todas las categorías"""
+    categories = list(set(p['category'] for p in products_db if p['category']))
+    return jsonify(categories)

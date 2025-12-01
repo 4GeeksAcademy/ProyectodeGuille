@@ -1,188 +1,253 @@
-from flask import request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
-from ..models import db, Cart, CartItem, Product
+from flask import Blueprint, jsonify, request
+from datetime import datetime
+
+cart_bp = Blueprint('cart', __name__)
+
+# Base de datos de carritos en memoria
+carts_db = {}
+cart_items_db = []
+item_counter = 1
+
+# Productos disponibles (simulados)
+available_products = [
+    {
+        "id": 1,
+        "name": "Producto Sostenible 1",
+        "price": 100.50,
+        "stock": 10,
+        "image_url": "https://via.placeholder.com/150"
+    },
+    {
+        "id": 2,
+        "name": "Producto Sostenible 2",
+        "price": 200.00,
+        "stock": 5,
+        "image_url": "https://via.placeholder.com/150"
+    },
+    {
+        "id": 3,
+        "name": "Producto Sostenible 3",
+        "price": 150.75,
+        "stock": 15,
+        "image_url": "https://via.placeholder.com/150"
+    }
+]
 
 
-def setup_cart_routes(api):
-    @api.route('/cart', methods=['GET'])
-    @jwt_required()
-    def get_cart():
-        try:
-            user_id = get_jwt_identity()
+@cart_bp.route('/', methods=['GET'])
+def get_cart():
+    """Obtener el carrito del usuario"""
+    user_id = request.args.get('user_id', type=int)
 
-            # Obtener o crear carrito
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if not cart:
-                return jsonify({'items': [], 'total': 0, 'cart_id': None}), 200
+    if not user_id:
+        return jsonify({"error": "user_id es requerido"}), 400
 
-            # Obtener items del carrito
-            cart_items = CartItem.query.filter_by(cart_id=cart.id).all()
-            items = []
-            total = 0
+    # Crear carrito si no existe
+    if user_id not in carts_db:
+        carts_db[user_id] = {
+            "id": user_id,
+            "user_id": user_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
 
-            for item in cart_items:
-                product = Product.query.get(item.product_id)
-                if product and product.is_active:
-                    item_total = product.price * item.quantity
-                    total += item_total
-                    items.append({
-                        'id': item.id,
-                        'product_id': product.id,
-                        'name': product.name,
-                        'price': product.price,
-                        'quantity': item.quantity,
-                        'subtotal': item_total,
-                        'image_url': product.image_url,
-                        'stock': product.stock
-                    })
+    # Obtener items del carrito
+    user_cart_items = [
+        item for item in cart_items_db if item['cart_id'] == user_id]
 
-            return jsonify({
-                'items': items,
-                'total': total,
-                'cart_id': cart.id
-            }), 200
+    # Enriquecer con información del producto
+    enriched_items = []
+    total = 0
 
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
+    for item in user_cart_items:
+        product = next(
+            (p for p in available_products if p['id'] == item['product_id']), None)
+        if product:
+            item_total = product['price'] * item['quantity']
+            total += item_total
 
-    @api.route('/cart/add', methods=['POST'])
-    @jwt_required()
-    def add_to_cart():
-        try:
-            user_id = get_jwt_identity()
-            data = request.get_json()
+            enriched_items.append({
+                **item,
+                "product_name": product['name'],
+                "product_price": product['price'],
+                "product_image": product['image_url'],
+                "item_total": item_total,
+                "available_stock": product['stock']
+            })
 
-            # Validar producto
-            product = Product.query.get(data['product_id'])
-            if not product or not product.is_active:
-                return jsonify({'error': 'Product not found'}), 404
+    return jsonify({
+        "cart": carts_db[user_id],
+        "items": enriched_items,
+        "summary": {
+            "items_count": len(enriched_items),
+            "total_items": sum(item['quantity'] for item in enriched_items),
+            "subtotal": total,
+            "shipping": 0 if total == 0 else 10.00,
+            "tax": round(total * 0.08, 2),
+            "total": total + (0 if total == 0 else 10.00) + round(total * 0.08, 2)
+        }
+    })
 
-            quantity = data.get('quantity', 1)
-            if product.stock < quantity:
-                return jsonify({'error': 'Insufficient stock'}), 400
 
-            # Obtener o crear carrito
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if not cart:
-                cart = Cart(user_id=user_id)
-                db.session.add(cart)
-                db.session.flush()
+@cart_bp.route('/add', methods=['POST'])
+def add_to_cart():
+    """Agregar producto al carrito"""
+    data = request.json
 
-            # Verificar si el producto ya está en el carrito
-            cart_item = CartItem.query.filter_by(
-                cart_id=cart.id,
-                product_id=product.id
-            ).first()
+    if not data or 'user_id' not in data or 'product_id' not in data:
+        return jsonify({"error": "user_id y product_id son requeridos"}), 400
 
-            if cart_item:
-                new_quantity = cart_item.quantity + quantity
-                if product.stock < new_quantity:
-                    return jsonify({'error': 'Insufficient stock'}), 400
-                cart_item.quantity = new_quantity
-            else:
-                cart_item = CartItem(
-                    cart_id=cart.id,
-                    product_id=product.id,
-                    quantity=quantity
-                )
-                db.session.add(cart_item)
+    user_id = data['user_id']
+    product_id = data['product_id']
+    quantity = data.get('quantity', 1)
 
-            cart.updated_at = db.func.now()
-            db.session.commit()
+    # Verificar que el producto exista
+    product = next(
+        (p for p in available_products if p['id'] == product_id), None)
+    if not product:
+        return jsonify({"error": "Producto no encontrado"}), 404
 
-            return jsonify({
-                'message': 'Product added to cart',
-                'cart_item_id': cart_item.id
-            }), 200
+    # Verificar stock
+    if quantity > product['stock']:
+        return jsonify({"error": "Stock insuficiente"}), 400
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+    # Crear carrito si no existe
+    if user_id not in carts_db:
+        carts_db[user_id] = {
+            "id": user_id,
+            "user_id": user_id,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
 
-    @api.route('/cart/update/<int:item_id>', methods=['PUT'])
-    @jwt_required()
-    def update_cart_item(item_id):
-        try:
-            user_id = get_jwt_identity()
-            data = request.get_json()
-            quantity = data.get('quantity', 1)
+    # Verificar si el producto ya está en el carrito
+    existing_item = next(
+        (item for item in cart_items_db
+         if item['cart_id'] == user_id and item['product_id'] == product_id),
+        None
+    )
 
-            if quantity < 0:
-                return jsonify({'error': 'Invalid quantity'}), 400
+    global item_counter
 
-            # Encontrar el carrito del usuario
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if not cart:
-                return jsonify({'error': 'Cart not found'}), 404
+    if existing_item:
+        # Actualizar cantidad
+        existing_item['quantity'] += quantity
+        existing_item['updated_at'] = datetime.utcnow().isoformat()
+    else:
+        # Agregar nuevo item
+        new_item = {
+            "id": item_counter,
+            "cart_id": user_id,
+            "product_id": product_id,
+            "quantity": quantity,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        cart_items_db.append(new_item)
+        item_counter += 1
 
-            # Encontrar el item
-            cart_item = CartItem.query.filter_by(
-                id=item_id, cart_id=cart.id).first()
-            if not cart_item:
-                return jsonify({'error': 'Item not found in cart'}), 404
+    # Actualizar timestamp del carrito
+    carts_db[user_id]['updated_at'] = datetime.utcnow().isoformat()
 
-            # Validar stock
-            product = Product.query.get(cart_item.product_id)
-            if quantity > product.stock:
-                return jsonify({'error': 'Insufficient stock'}), 400
+    return jsonify({
+        "success": True,
+        "message": "Producto agregado al carrito",
+        "cart_id": user_id
+    })
 
-            if quantity == 0:
-                db.session.delete(cart_item)
-            else:
-                cart_item.quantity = quantity
 
-            cart.updated_at = db.func.now()
-            db.session.commit()
+@cart_bp.route('/update/<int:item_id>', methods=['PUT'])
+def update_cart_item(item_id):
+    """Actualizar cantidad de un item en el carrito"""
+    data = request.json
 
-            return jsonify({'message': 'Cart updated successfully'}), 200
+    if not data or 'quantity' not in data:
+        return jsonify({"error": "quantity es requerido"}), 400
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+    quantity = data['quantity']
 
-    @api.route('/cart/remove/<int:item_id>', methods=['DELETE'])
-    @jwt_required()
-    def remove_from_cart(item_id):
-        try:
-            user_id = get_jwt_identity()
+    if quantity < 0:
+        return jsonify({"error": "La cantidad no puede ser negativa"}), 400
 
-            # Encontrar el carrito del usuario
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if not cart:
-                return jsonify({'error': 'Cart not found'}), 404
+    # Buscar el item
+    item = next(
+        (item for item in cart_items_db if item['id'] == item_id), None)
 
-            # Encontrar y eliminar el item
-            cart_item = CartItem.query.filter_by(
-                id=item_id, cart_id=cart.id).first()
-            if not cart_item:
-                return jsonify({'error': 'Item not found in cart'}), 404
+    if not item:
+        return jsonify({"error": "Item no encontrado en el carrito"}), 404
 
-            db.session.delete(cart_item)
-            cart.updated_at = db.func.now()
-            db.session.commit()
+    # Verificar producto y stock
+    product = next(
+        (p for p in available_products if p['id'] == item['product_id']), None)
+    if not product:
+        return jsonify({"error": "Producto no encontrado"}), 404
 
-            return jsonify({'message': 'Item removed from cart'}), 200
+    if quantity > product['stock']:
+        return jsonify({"error": "Stock insuficiente"}), 400
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+    # Actualizar cantidad
+    if quantity == 0:
+        # Eliminar el item si la cantidad es 0
+        cart_items_db[:] = [i for i in cart_items_db if i['id'] != item_id]
+        message = "Item eliminado del carrito"
+    else:
+        item['quantity'] = quantity
+        item['updated_at'] = datetime.utcnow().isoformat()
+        message = "Cantidad actualizada"
 
-    @api.route('/cart/clear', methods=['DELETE'])
-    @jwt_required()
-    def clear_cart():
-        try:
-            user_id = get_jwt_identity()
+    # Actualizar timestamp del carrito
+    if item['cart_id'] in carts_db:
+        carts_db[item['cart_id']]['updated_at'] = datetime.utcnow().isoformat()
 
-            cart = Cart.query.filter_by(user_id=user_id).first()
-            if not cart:
-                return jsonify({'message': 'Cart is already empty'}), 200
+    return jsonify({
+        "success": True,
+        "message": message
+    })
 
-            CartItem.query.filter_by(cart_id=cart.id).delete()
-            cart.updated_at = db.func.now()
-            db.session.commit()
 
-            return jsonify({'message': 'Cart cleared successfully'}), 200
+@cart_bp.route('/remove/<int:item_id>', methods=['DELETE'])
+def remove_from_cart(item_id):
+    """Eliminar item del carrito"""
 
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+    # Buscar el item
+    item = next(
+        (item for item in cart_items_db if item['id'] == item_id), None)
+
+    if not item:
+        return jsonify({"error": "Item no encontrado en el carrito"}), 404
+
+    # Eliminar el item
+    cart_items_db[:] = [i for i in cart_items_db if i['id'] != item_id]
+
+    # Actualizar timestamp del carrito
+    if item['cart_id'] in carts_db:
+        carts_db[item['cart_id']]['updated_at'] = datetime.utcnow().isoformat()
+
+    return jsonify({
+        "success": True,
+        "message": "Item eliminado del carrito"
+    })
+
+
+@cart_bp.route('/clear', methods=['POST'])
+def clear_cart():
+    """Vaciar el carrito completo"""
+    data = request.json
+
+    if not data or 'user_id' not in data:
+        return jsonify({"error": "user_id es requerido"}), 400
+
+    user_id = data['user_id']
+
+    # Eliminar todos los items del usuario
+    cart_items_db[:] = [
+        item for item in cart_items_db if item['cart_id'] != user_id]
+
+    # Actualizar timestamp del carrito
+    if user_id in carts_db:
+        carts_db[user_id]['updated_at'] = datetime.utcnow().isoformat()
+
+    return jsonify({
+        "success": True,
+        "message": "Carrito vaciado"
+    })

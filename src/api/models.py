@@ -7,18 +7,20 @@ db = SQLAlchemy()
 
 
 class User(db.Model):
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(
-        String(120), unique=True, nullable=False)
-    password: Mapped[str] = mapped_column(String(200), nullable=False)
-    first_name: Mapped[str] = mapped_column(String(50), nullable=True)
-    last_name: Mapped[str] = mapped_column(String(50), nullable=True)
-    phone: Mapped[str] = mapped_column(String(20), nullable=True)
-    is_active: Mapped[bool] = mapped_column(
-        Boolean(), default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow)
-    role: Mapped[str] = mapped_column(String(20), default='customer')
+    __tablename__ = 'users'
+
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password = db.Column(db.String(200), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    role = db.Column(db.String(20), nullable=False, default='customer')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relaciones (nuevas)
+    business = db.relationship('Business', backref='owner', uselist=False)
+    cart = db.relationship('Cart', backref='customer', uselist=False)
+    quotes = db.relationship('Quote', backref='customer', lazy=True)
+    orders = db.relationship('Order', backref='customer', lazy=True)
 
     def serialize(self):
         return {
@@ -98,3 +100,20 @@ class OrderItem(db.Model):
     product_id: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
+
+
+class Business(db.Model):
+    __tablename__ = 'businesses'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True)
+    company_name = db.Column(db.String(200), nullable=False)
+    industry = db.Column(db.String(100))
+    address = db.Column(db.Text)
+    phone = db.Column(db.String(20))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relaciones (nuevas)
+    products = db.relationship('Product', backref='business', lazy=True)
+    quotes = db.relationship('Quote', backref='business', lazy=True)
+    analytics = db.relationship('Analytics', backref='business', lazy=True)

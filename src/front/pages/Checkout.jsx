@@ -1,220 +1,151 @@
-import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext.jsx'
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import useBackend, { API_ENDPOINTS } from '../components/BackendURL';
 
 const Checkout = () => {
-    const { user, getToken } = useAuth()
-    const navigate = useNavigate()
-    const [cartItems, setCartItems] = useState([])
-    const [total, setTotal] = useState(0)
-    const [loading, setLoading] = useState(true)
-    const [processing, setProcessing] = useState(false)
-    const [orderId, setOrderId] = useState(null)
+    const [step, setStep] = useState(1); // 1: Dirección, 2: Pago, 3: Confirmación
+    const [paymentMethod, setPaymentMethod] = useState('credit_card');
+    const [cardNumber, setCardNumber] = useState('');
+    const [expiry, setExpiry] = useState('');
+    const [cvc, setCvc] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
 
-    useEffect(() => {
-        if (!user) {
-            navigate('/login')
-            return
-        }
-        fetchCart()
-    }, [user, navigate])
+    const { fetchFromBackend } = useBackend();
+    const navigate = useNavigate();
 
-    const fetchCart = async () => {
+    const handlePayment = async () => {
+        setIsProcessing(true);
+
         try {
-            const token = getToken()
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/cart`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
+            // 1. Obtener carrito del usuario
+            const user = JSON.parse(localStorage.getItem('user'));
+            const cartResponse = await fetchFromBackend(`${API_ENDPOINTS.CART.GET}?user_id=${user.id}`);
+
+            // 2. Crear orden
+            const orderData = {
+                user_id: user.id,
+                items: cartResponse.items,
+                payment_method: paymentMethod,
+                shipping_address: {
+                    street: "Calle Principal 123",
+                    city: "Ciudad",
+                    zip: "12345"
                 }
-            })
+            };
 
-            if (response.ok) {
-                const data = await response.json()
-                if (data.items.length === 0) {
-                    navigate('/cart')
-                    return
-                }
-                setCartItems(data.items)
-                setTotal(data.total)
-            }
-        } catch (error) {
-            console.error('Error fetching cart:', error)
-        } finally {
-            setLoading(false)
-        }
-    }
-
-    const processPayment = async () => {
-        if (!user) {
-            alert('Por favor inicia sesión para continuar')
-            navigate('/login')
-            return
-        }
-
-        if (cartItems.length === 0) {
-            alert('Tu carrito está vacío')
-            navigate('/products')
-            return
-        }
-
-        setProcessing(true)
-        try {
-            const token = getToken()
-
-            // Crear payment intent
-            const paymentResponse = await fetch(`${import.meta.env.VITE_BACKEND_URL}/checkout/create-payment`, {
+            const orderResponse = await fetchFromBackend(API_ENDPOINTS.ORDERS.CREATE, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            })
+                body: JSON.stringify(orderData)
+            });
 
-            if (!paymentResponse.ok) {
-                const error = await paymentResponse.json()
-                throw new Error(error.error || 'Error al crear pago')
-            }
+            // 3. Procesar pago
+            const paymentData = {
+                order_id: orderResponse.order.id,
+                amount: orderResponse.order.total,
+                payment_method: paymentMethod
+            };
 
-            const paymentData = await paymentResponse.json()
-            setOrderId(paymentData.order_id)
-
-            // Simular pago exitoso (en producción usarías Stripe Elements)
-            alert('Pago simulado exitoso. Redirigiendo...')
-
-            // Confirmar pago
-            const confirmResponse = await fetch(`${import.meta.env.VITE_BACKEND_URL}/checkout/confirm`, {
+            const paymentResponse = await fetchFromBackend('/payments/create-payment', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ order_id: paymentData.order_id })
-            })
+                body: JSON.stringify(paymentData)
+            });
 
-            if (confirmResponse.ok) {
-                const orderData = await confirmResponse.json()
-                alert(`¡Pago exitoso! Orden #${orderData.order.id} creada`)
-                navigate('/orders')
+            if (paymentResponse.success) {
+                // 4. Vaciar carrito
+                await fetchFromBackend('/cart/clear', {
+                    method: 'POST',
+                    body: JSON.stringify({ user_id: user.id })
+                });
+
+                // 5. Redirigir a confirmación
+                navigate('/orders');
             } else {
-                const error = await confirmResponse.json()
-                alert(`Error al confirmar pago: ${error.error}`)
+                alert('Pago fallido. Intenta nuevamente.');
             }
-        } catch (error) {
-            alert(`Error: ${error.message}`)
-        } finally {
-            setProcessing(false)
-        }
-    }
 
-    if (loading) {
-        return (
-            <div className="loading">
-                <div className="spinner"></div>
-                <p>Cargando checkout...</p>
-            </div>
-        )
-    }
+        } catch (error) {
+            console.error('Error en checkout:', error);
+            alert('Error al procesar el pedido');
+        } finally {
+            setIsProcessing(false);
+        }
+    };
 
     return (
-        <div className="checkout-page">
-            <h1>Checkout</h1>
+        <div className="container mx-auto px-4 py-8">
+            <h1 className="text-3xl font-bold mb-8">Checkout</h1>
 
-            <div className="checkout-content">
-                <div className="order-summary">
-                    <h3>Resumen de tu Pedido</h3>
-
-                    <div className="order-items">
-                        {cartItems.map(item => (
-                            <div key={item.id} className="order-item">
-                                <div className="item-info">
-                                    <span className="item-name">{item.name}</span>
-                                    <span className="item-quantity">x{item.quantity}</span>
-                                </div>
-                                <span className="item-price">
-                                    ${(item.price * item.quantity).toFixed(2)}
-                                </span>
+            {/* Pasos */}
+            <div className="mb-8">
+                <div className="flex justify-between">
+                    {['Dirección', 'Pago', 'Confirmación'].map((label, index) => (
+                        <div key={index} className="flex items-center">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${step > index + 1 ? 'bg-green-500' :
+                                    step === index + 1 ? 'bg-blue-500' : 'bg-gray-300'
+                                } text-white`}>
+                                {index + 1}
                             </div>
-                        ))}
-                    </div>
-
-                    <div className="order-totals">
-                        <div className="total-row">
-                            <span>Subtotal:</span>
-                            <span>${total.toFixed(2)}</span>
+                            <span className="ml-2">{label}</span>
+                            {index < 2 && <div className="w-16 h-1 bg-gray-300 mx-2"></div>}
                         </div>
-                        <div className="total-row">
-                            <span>Envío:</span>
-                            <span>Gratis</span>
-                        </div>
-                        <div className="total-row grand-total">
-                            <span>Total:</span>
-                            <span>${total.toFixed(2)}</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="payment-section">
-                    <h3>Información de Pago</h3>
-
-                    <div className="payment-methods">
-                        <div className="payment-method active">
-                            <div className="method-icon">💳</div>
-                            <div className="method-info">
-                                <h4>Tarjeta de Crédito/Débito</h4>
-                                <p>Pago seguro con Stripe</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="payment-form">
-                        <div className="form-group">
-                            <label>Número de Tarjeta</label>
-                            <input
-                                type="text"
-                                placeholder="1234 5678 9012 3456"
-                                value="4242 4242 4242 4242" // Demo
-                                readOnly
-                            />
-                        </div>
-
-                        <div className="form-row">
-                            <div className="form-group">
-                                <label>Fecha de Expiración</label>
-                                <input
-                                    type="text"
-                                    placeholder="MM/YY"
-                                    value="12/34"
-                                    readOnly
-                                />
-                            </div>
-
-                            <div className="form-group">
-                                <label>CVC</label>
-                                <input
-                                    type="text"
-                                    placeholder="123"
-                                    value="123"
-                                    readOnly
-                                />
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={processPayment}
-                            disabled={processing}
-                            className="btn btn-pay"
-                        >
-                            {processing ? 'Procesando...' : `Pagar $${total.toFixed(2)}`}
-                        </button>
-
-                        <p className="demo-notice">
-                            ⚠️ Este es un checkout de demostración. No se procesarán pagos reales.
-                        </p>
-                    </div>
+                    ))}
                 </div>
             </div>
-        </div>
-    )
-}
 
-export default Checkout
+            {/* Formulario de pago */}
+            {step === 2 && (
+                <div className="max-w-md mx-auto">
+                    <h2 className="text-xl font-semibold mb-4">Método de Pago</h2>
+
+                    <select
+                        className="w-full p-2 border rounded mb-4"
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value)}
+                    >
+                        <option value="credit_card">Tarjeta de Crédito</option>
+                        <option value="paypal">PayPal</option>
+                        <option value="bank_transfer">Transferencia Bancaria</option>
+                    </select>
+
+                    {paymentMethod === 'credit_card' && (
+                        <div className="space-y-4">
+                            <input
+                                type="text"
+                                placeholder="Número de tarjeta"
+                                className="w-full p-2 border rounded"
+                                value={cardNumber}
+                                onChange={(e) => setCardNumber(e.target.value)}
+                            />
+                            <div className="flex space-x-4">
+                                <input
+                                    type="text"
+                                    placeholder="MM/AA"
+                                    className="flex-1 p-2 border rounded"
+                                    value={expiry}
+                                    onChange={(e) => setExpiry(e.target.value)}
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="CVC"
+                                    className="w-24 p-2 border rounded"
+                                    value={cvc}
+                                    onChange={(e) => setCvc(e.target.value)}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    <button
+                        onClick={handlePayment}
+                        disabled={isProcessing}
+                        className="w-full mt-6 py-3 bg-green-500 text-white rounded hover:bg-green-600 disabled:opacity-50"
+                    >
+                        {isProcessing ? 'Procesando...' : 'Pagar Ahora'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default Checkout;

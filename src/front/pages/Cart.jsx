@@ -1,238 +1,248 @@
-import React, { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext.jsx'
+import React, { useState, useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { useGlobal } from '../hooks/useGlobalReducer';
+import useBackend, { API_ENDPOINTS } from '../components/BackendURL';
 
 const Cart = () => {
-    const { user, getToken } = useAuth()
-    const navigate = useNavigate()
-    const [cartItems, setCartItems] = useState([])
-    const [total, setTotal] = useState(0)
-    const [loading, setLoading] = useState(true)
+    const [cartItems, setCartItems] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
+    const [total, setTotal] = useState(0);
+
+    const { state } = useGlobal();
+    const { fetchFromBackend } = useBackend();
+    const navigate = useNavigate();
 
     useEffect(() => {
-        if (user) {
-            fetchCart()
-        } else {
-            setLoading(false)
-        }
-    }, [user])
+        fetchCart();
+    }, []);
+
+    useEffect(() => {
+        calculateTotal();
+    }, [cartItems]);
 
     const fetchCart = async () => {
         try {
-            const token = getToken()
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/cart`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            })
+            setLoading(true);
+            const user = JSON.parse(localStorage.getItem('user'));
 
-            if (response.ok) {
-                const data = await response.json()
-                setCartItems(data.items)
-                setTotal(data.total)
+            if (!user) {
+                navigate('/login');
+                return;
             }
-        } catch (error) {
-            console.error('Error fetching cart:', error)
+
+            const data = await fetchFromBackend(API_ENDPOINTS.CART.GET, {
+                method: 'GET'
+            });
+
+            setCartItems(data.cart || []);
+            setTotal(data.total || 0);
+        } catch (err) {
+            setError('Error al cargar el carrito');
+            console.error('Error fetching cart:', err);
         } finally {
-            setLoading(false)
+            setLoading(false);
         }
-    }
+    };
 
-    const updateQuantity = async (itemId, newQuantity) => {
+    const calculateTotal = () => {
+        const newTotal = cartItems.reduce((sum, item) => {
+            return sum + (item.price * item.quantity);
+        }, 0);
+        setTotal(newTotal);
+    };
+
+    const handleUpdateQuantity = async (itemId, newQuantity) => {
         if (newQuantity < 1) {
-            removeFromCart(itemId)
-            return
+            await handleRemoveItem(itemId);
+            return;
         }
 
         try {
-            const token = getToken()
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/cart/update/${itemId}`, {
+            await fetchFromBackend(`/cart/update/${itemId}`, {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
                 body: JSON.stringify({ quantity: newQuantity })
-            })
+            });
 
-            if (response.ok) {
-                fetchCart()
-            } else {
-                const error = await response.json()
-                alert(`Error: ${error.error}`)
-            }
-        } catch (error) {
-            alert('Error al actualizar cantidad')
+            setCartItems(items =>
+                items.map(item =>
+                    item.cart_item_id === itemId
+                        ? { ...item, quantity: newQuantity }
+                        : item
+                )
+            );
+        } catch (err) {
+            console.error('Error updating quantity:', err);
+            alert('Error al actualizar la cantidad');
         }
-    }
+    };
 
-    const removeFromCart = async (itemId) => {
+    const handleRemoveItem = async (itemId) => {
         try {
-            const token = getToken()
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/cart/remove/${itemId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            })
+            await fetchFromBackend(API_ENDPOINTS.CART.REMOVE(itemId), {
+                method: 'DELETE'
+            });
 
-            if (response.ok) {
-                fetchCart()
-            }
-        } catch (error) {
-            alert('Error al eliminar del carrito')
+            setCartItems(items => items.filter(item => item.cart_item_id !== itemId));
+        } catch (err) {
+            console.error('Error removing item:', err);
+            alert('Error al remover el producto');
         }
-    }
+    };
 
-    const clearCart = async () => {
-        if (!confirm('¿Estás seguro de que quieres vaciar el carrito?')) return
-
-        try {
-            const token = getToken()
-            const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/cart/clear`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
-            })
-
-            if (response.ok) {
-                fetchCart()
-            }
-        } catch (error) {
-            alert('Error al vaciar el carrito')
+    const handleCheckout = () => {
+        if (cartItems.length === 0) {
+            alert('El carrito está vacío');
+            return;
         }
-    }
+        navigate('/checkout');
+    };
 
     if (loading) {
         return (
-            <div className="loading">
-                <div className="spinner"></div>
-                <p>Cargando carrito...</p>
+            <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
             </div>
-        )
+        );
     }
 
-    if (!user) {
+    if (error) {
         return (
-            <div className="cart-empty">
-                <h2>Inicia sesión para ver tu carrito</h2>
-                <p>Necesitas una cuenta para agregar productos al carrito</p>
-                <div className="auth-buttons">
-                    <Link to="/login" className="btn btn-primary">
-                        Iniciar Sesión
-                    </Link>
-                    <Link to="/register" className="btn btn-secondary">
-                        Crear Cuenta
-                    </Link>
-                </div>
+            <div className="text-center py-12">
+                <p className="text-red-500">{error}</p>
+                <button
+                    onClick={fetchCart}
+                    className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                    Reintentar
+                </button>
             </div>
-        )
-    }
-
-    if (cartItems.length === 0) {
-        return (
-            <div className="cart-empty">
-                <h2>Tu carrito está vacío</h2>
-                <p>Agrega algunos productos para comenzar</p>
-                <Link to="/products" className="btn btn-primary">
-                    Ver Productos
-                </Link>
-            </div>
-        )
+        );
     }
 
     return (
-        <div className="cart-page">
-            <h1>Tu Carrito de Compras</h1>
+        <div className="container mx-auto px-4 py-8">
+            <h1 className="text-3xl font-bold mb-8">Tu Carrito de Compras</h1>
 
-            <div className="cart-content">
-                <div className="cart-items">
-                    {cartItems.map(item => (
-                        <div key={item.id} className="cart-item">
-                            <img
-                                src={item.image_url || 'https://via.placeholder.com/100x100'}
-                                alt={item.name}
-                                className="item-image"
-                            />
+            {cartItems.length === 0 ? (
+                <div className="text-center py-12">
+                    <div className="text-gray-400 text-6xl mb-4">🛒</div>
+                    <p className="text-gray-600 text-lg mb-6">Tu carrito está vacío</p>
+                    <Link
+                        to="/products"
+                        className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                    >
+                        Explorar Productos
+                    </Link>
+                </div>
+            ) : (
+                <>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        {/* Lista de productos */}
+                        <div className="lg:col-span-2">
+                            <div className="bg-white rounded-lg shadow-md overflow-hidden">
+                                <div className="p-6">
+                                    <h2 className="text-xl font-semibold mb-6">Productos ({cartItems.length})</h2>
 
-                            <div className="item-details">
-                                <h3>{item.name}</h3>
-                                <p className="item-price">${item.price.toFixed(2)}</p>
-                                <p className="item-stock">Stock disponible: {item.stock}</p>
+                                    <div className="space-y-4">
+                                        {cartItems.map(item => (
+                                            <div key={item.cart_item_id} className="flex items-center border-b pb-4">
+                                                {/* Imagen */}
+                                                <div className="w-24 h-24 mr-4">
+                                                    <img
+                                                        src={item.image_url || 'https://via.placeholder.com/100'}
+                                                        alt={item.name}
+                                                        className="w-full h-full object-cover rounded"
+                                                    />
+                                                </div>
 
-                                <div className="quantity-controls">
-                                    <button
-                                        onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                                        disabled={item.quantity <= 1}
-                                    >
-                                        -
-                                    </button>
-                                    <span>{item.quantity}</span>
-                                    <button
-                                        onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                                        disabled={item.quantity >= item.stock}
-                                    >
-                                        +
-                                    </button>
+                                                {/* Información */}
+                                                <div className="flex-1">
+                                                    <h3 className="font-medium text-gray-800">{item.name}</h3>
+                                                    <p className="text-gray-600">${item.price.toFixed(2)} cada uno</p>
+
+                                                    {/* Controles de cantidad */}
+                                                    <div className="flex items-center mt-2">
+                                                        <button
+                                                            onClick={() => handleUpdateQuantity(item.cart_item_id, item.quantity - 1)}
+                                                            className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-l"
+                                                        >
+                                                            −
+                                                        </button>
+                                                        <span className="w-12 h-8 flex items-center justify-center border-t border-b border-gray-300">
+                                                            {item.quantity}
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleUpdateQuantity(item.cart_item_id, item.quantity + 1)}
+                                                            className="w-8 h-8 flex items-center justify-center border border-gray-300 rounded-r"
+                                                        >
+                                                            +
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() => handleRemoveItem(item.cart_item_id)}
+                                                            className="ml-4 text-red-500 hover:text-red-700"
+                                                        >
+                                                            Eliminar
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Subtotal */}
+                                                <div className="text-right">
+                                                    <p className="font-semibold text-lg">
+                                                        ${(item.price * item.quantity).toFixed(2)}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
-
-                            <div className="item-subtotal">
-                                ${(item.price * item.quantity).toFixed(2)}
-                            </div>
-
-                            <button
-                                onClick={() => removeFromCart(item.id)}
-                                className="remove-btn"
-                            >
-                                ×
-                            </button>
                         </div>
-                    ))}
 
-                    <div className="cart-actions">
-                        <button onClick={clearCart} className="btn btn-clear">
-                            Vaciar Carrito
-                        </button>
-                        <Link to="/products" className="btn btn-continue">
-                            Continuar Comprando
-                        </Link>
+                        {/* Resumen del pedido */}
+                        <div className="lg:col-span-1">
+                            <div className="bg-white rounded-lg shadow-md p-6 sticky top-4">
+                                <h2 className="text-xl font-semibold mb-6">Resumen del Pedido</h2>
+
+                                <div className="space-y-4 mb-6">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Subtotal</span>
+                                        <span>${total.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-600">Envío</span>
+                                        <span className="text-green-600">Gratis</span>
+                                    </div>
+                                    <div className="border-t pt-4">
+                                        <div className="flex justify-between text-lg font-bold">
+                                            <span>Total</span>
+                                            <span>${total.toFixed(2)}</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleCheckout}
+                                    className="w-full py-3 bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition-colors mb-4"
+                                >
+                                    Proceder al Pago
+                                </button>
+
+                                <Link
+                                    to="/products"
+                                    className="block text-center text-blue-500 hover:text-blue-700"
+                                >
+                                    ← Continuar comprando
+                                </Link>
+                            </div>
+                        </div>
                     </div>
-                </div>
-
-                <div className="cart-summary">
-                    <h3>Resumen del Pedido</h3>
-
-                    <div className="summary-item">
-                        <span>Subtotal:</span>
-                        <span>${total.toFixed(2)}</span>
-                    </div>
-
-                    <div className="summary-item">
-                        <span>Envío:</span>
-                        <span>Gratis</span>
-                    </div>
-
-                    <div className="summary-item total">
-                        <span>Total:</span>
-                        <span>${total.toFixed(2)}</span>
-                    </div>
-
-                    <button
-                        onClick={() => navigate('/checkout')}
-                        className="btn btn-checkout"
-                    >
-                        Proceder al Pago
-                    </button>
-
-                    <p className="secure-checkout">
-                        🔒 Pago 100% seguro
-                    </p>
-                </div>
-            </div>
+                </>
+            )}
         </div>
-    )
-}
+    );
+};
 
-export default Cart
+export default Cart;
